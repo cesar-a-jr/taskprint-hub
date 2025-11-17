@@ -211,7 +211,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   printTask: async (taskId) => {
     set({ loading: true, error: null });
     try {
-      const response = await fetch('http://localhost:3000/print/task', {
+      const response = await fetch(`http://localhost:3000/print/task/${taskId}`, {
         method: 'POST',
         headers: getAuthHeader(),
         body: JSON.stringify({ taskId })
