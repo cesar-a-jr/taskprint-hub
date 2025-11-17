@@ -276,5 +276,3 @@ ${task.zone ? `Zona: ${task.zone}` : ''}
     }
   }
 }
-
-export default ThermalPrinterService;
