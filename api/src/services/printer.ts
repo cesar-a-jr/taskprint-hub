@@ -1,290 +1,280 @@
 import { SerialPort } from 'serialport';
 
-// Detectar se estamos em ambiente de desenvolvimento
-const isDevelopment = process.env.NODE_ENV === 'development';
+// ESC/POS commands
+const CUT = Buffer.from([0x1D, 0x56, 0x00]); // Corte de papel
+const NEW_LINE = Buffer.from([0x0A]); // Nova linha
+const ALIGN_CENTER = Buffer.from([0x1B, 0x61, 0x01]); // Alinhamento centralizado
+const ALIGN_LEFT = Buffer.from([0x1B, 0x61, 0x00]); // Alinhamento à esquerda
+const BOLD_ON = Buffer.from([0x1B, 0x45, 0x01]); // Negrito ligado
+const BOLD_OFF = Buffer.from([0x1B, 0x45, 0x00]); // Negrito desligado
+const DOUBLE_HEIGHT = Buffer.from([0x1D, 0x21, 0x01]); // Altura dupla
+const NORMAL_SIZE = Buffer.from([0x1D, 0x21, 0x00]); // Tamanho normal
 
-// Em desenvolvimento, criar uma porta mock para testes
-let port: SerialPort | null = null;
+export class ThermalPrinterService {
+  private port: SerialPort | null = null;
+  private isConnected = false;
+  private portPath: string;
+  private baudRate: number;
 
-try {
-  if (isDevelopment) {
-    console.log('🧪 Modo desenvolvimento: usando impressora mock');
-    // Em desenvolvimento, não conecta à porta real
-  } else {
-    // Em produção, tenta conectar à porta real
-    port = new SerialPort({
-      path: process.env.PRINTER_PORT || 'COM3', // Configurável via variável de ambiente
-      baudRate: 9600,
-      autoOpen: false
-    });
-
-    port.open((err) => {
-      if (err) {
-        console.error('❌ Erro ao abrir porta da impressora:', err.message);
-        console.log('📝 Verifique se a impressora está conectada e a porta está correta');
-        port = null;
-      } else {
-        console.log('✅ Impressora conectada com sucesso!');
-      }
-    });
-
-    port.on('error', (err) => {
-      console.error('❌ Erro na porta serial:', err.message);
-    });
-  }
-} catch (error) {
-  console.error('❌ Erro ao inicializar impressora:', error);
-  port = null;
-}
-
-// Comandos ESC/POS
-const CUT = Buffer.from([0x1D, 0x56, 0x00]);
-const NEW_LINE = Buffer.from([0x0A]);
-const ALIGN_CENTER = Buffer.from([0x1B, 0x61, 0x01]);
-const ALIGN_LEFT = Buffer.from([0x1B, 0x61, 0x00]);
-const BOLD_ON = Buffer.from([0x1B, 0x45, 0x01]);
-const BOLD_OFF = Buffer.from([0x1B, 0x45, 0x00]);
-const DOUBLE_SIZE = Buffer.from([0x1D, 0x21, 0x11]);
-const NORMAL_SIZE = Buffer.from([0x1D, 0x21, 0x00]);
-
-interface Task {
-  id: string;
-  title: string;
-  description: string;
-  time: string;
-  repeat_daily: boolean;
-  days?: number[];
-  category: string;
-  zone?: number;
-}
-
-function formatTask(task: Task): string {
-  const diasSemana = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
-  
-  let diasText = "Diariamente";
-  if (!task.repeat_daily && task.days && task.days.length > 0) {
-    diasText = task.days.map(d => diasSemana[d - 1]).join(", ");
+  constructor(portPath: string = 'COM3', baudRate: number = 9600) {
+    this.portPath = portPath;
+    this.baudRate = baudRate;
   }
 
-  return `
+  async connect(): Promise<boolean> {
+    try {
+      this.port = new SerialPort({
+        path: this.portPath,
+        baudRate: this.baudRate,
+        autoOpen: false,
+      });
+
+      return new Promise((resolve) => {
+        this.port!.open((err) => {
+          if (err) {
+            console.error('❌ Erro ao conectar à impressora:', err.message);
+            this.isConnected = false;
+            resolve(false);
+          } else {
+            console.log('✅ Impressora conectada com sucesso!');
+            this.isConnected = true;
+            resolve(true);
+          }
+        });
+
+        this.port!.on('error', (err) => {
+          console.error('❌ Erro na impressora:', err.message);
+          this.isConnected = false;
+        });
+
+        this.port!.on('close', () => {
+          console.log('📄 Conexão com impressora fechada');
+          this.isConnected = false;
+        });
+      });
+    } catch (error) {
+      console.error('❌ Erro ao criar conexão serial:', error);
+      this.isConnected = false;
+      return false;
+    }
+  }
+
+  disconnect(): void {
+    if (this.port && this.isConnected) {
+      this.port.close();
+      this.isConnected = false;
+    }
+  }
+
+  isPrinterConnected(): boolean {
+    return this.isConnected;
+  }
+
+  private async writeBuffer(buffer: Buffer): Promise<boolean> {
+    if (!this.port || !this.isConnected) {
+      console.error('❌ Impressora não conectada');
+      return false;
+    }
+
+    return new Promise((resolve) => {
+      this.port!.write(buffer, (err) => {
+        if (err) {
+          console.error('❌ Erro ao escrever na impressora:', err.message);
+          resolve(false);
+        } else {
+          this.port!.drain(() => {
+            resolve(true);
+          });
+        }
+      });
+    });
+  }
+
+  async printText(text: string): Promise<boolean> {
+    const buffer = Buffer.from(text, 'utf-8');
+    return await this.writeBuffer(buffer);
+  }
+
+  async printLine(text: string = ''): Promise<boolean> {
+    const buffer = Buffer.from(text + '\n', 'utf-8');
+    return await this.writeBuffer(buffer);
+  }
+
+  async cutPaper(): Promise<boolean> {
+    return await this.writeBuffer(CUT);
+  }
+
+  async setAlignCenter(): Promise<boolean> {
+    return await this.writeBuffer(ALIGN_CENTER);
+  }
+
+  async setAlignLeft(): Promise<boolean> {
+    return await this.writeBuffer(ALIGN_LEFT);
+  }
+
+  async setBold(on: boolean = true): Promise<boolean> {
+    return await this.writeBuffer(on ? BOLD_ON : BOLD_OFF);
+  }
+
+  async setDoubleHeight(): Promise<boolean> {
+    return await this.writeBuffer(DOUBLE_HEIGHT);
+  }
+
+  async setNormalSize(): Promise<boolean> {
+    return await this.writeBuffer(NORMAL_SIZE);
+  }
+
+  formatTask(task: any): string {
+    const diasSemana = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+    
+    let diasText = "Diariamente";
+    if (!task.repeat_daily && task.days?.length > 0) {
+      diasText = task.days.map((d: number) => diasSemana[d - 1]).join(", ");
+    }
+
+    return `
 ==============================
-${task.title.toUpperCase()}
+        AVISO PROGRAMADO  
 ==============================
 
-📋 Descrição: ${task.description}
-🕐 Horário: ${task.time}
-📅 Dias: ${diasText}
-🏷️ Categoria: ${task.category}
-${task.zone ? `🏠 Zona: ${task.zone}` : ''}
+ID: ${task.id}
+Título: ${task.title}
+Descrição: ${task.description}
+Horário: ${task.time}
+Dias: ${diasText}
+Categoria: ${task.category}
+Prioridade: ${task.priority}
+Duração: ${task.estimated_duration} minutos
+${task.zone ? `Zona: ${task.zone}` : ''}
 
 ==============================
 
 `;
-}
+  }
 
-export function printTask(task: Task): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const texto = formatTask(task);
-    
-    if (isDevelopment || !port) {
-      console.log("🧪 MODO DESENVOLVIMENTO - Texto que seria impresso:");
-      console.log("═".repeat(50));
-      console.log(texto);
-      console.log("═".repeat(50));
-      resolve();
-      return;
-    }
-
-    if (!port || !port.isOpen) {
-      reject(new Error('Impressora não conectada'));
-      return;
-    }
-
-    console.log("🖨️ Texto sendo impresso:\n" + texto);
-
-    const printBuffer = Buffer.concat([
-      ALIGN_CENTER,
-      BOLD_ON,
-      Buffer.from("FLYLADY - TAREFA DO DIA\n"),
-      BOLD_OFF,
-      ALIGN_LEFT,
-      Buffer.from(texto),
-      NEW_LINE,
-      NEW_LINE,
-      NEW_LINE
-    ]);
-
-    port.write(printBuffer, (err) => {
-      if (err) {
-        console.error("❌ Erro ao imprimir:", err);
-        reject(err);
-        return;
+  async printTask(task: any): Promise<boolean> {
+    try {
+      if (!this.isConnected) {
+        console.log('📝 Modo simulação - Impressão da tarefa:');
+        console.log(this.formatTask(task));
+        return true;
       }
 
-      port!.drain(() => {
-        port!.write(CUT, (cutErr) => {
-          if (cutErr) {
-            console.error("❌ Erro ao cortar papel:", cutErr);
-            reject(cutErr);
-            return;
-          }
-          console.log("✅ Impressão concluída e papel cortado!");
-          resolve();
-        });
-      });
-    });
-  });
-}
+      const texto = this.formatTask(task);
+      console.log("🖨️ Texto sendo impresso:\n" + texto);
 
-export function printTaskList(tasks: Task[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (tasks.length === 0) {
-      console.log("📄 Nenhuma tarefa para imprimir");
-      resolve();
-      return;
-    }
-
-    if (isDevelopment || !port) {
-      console.log(`🧪 MODO DESENVOLVIMENTO - Lista com ${tasks.length} tarefas que seriam impressas:`);
-      console.log("═".repeat(50));
-      tasks.forEach((task, index) => {
-        console.log(`${index + 1}. ${task.time} - ${task.title}`);
-        console.log(`   ${task.description}`);
-        console.log(`   Categoria: ${task.category}`);
-        console.log("");
-      });
-      console.log("═".repeat(50));
-      resolve();
-      return;
-    }
-
-    if (!port || !port.isOpen) {
-      reject(new Error('Impressora não conectada'));
-      return;
-    }
-
-    console.log(`🖨️ Imprimindo lista com ${tasks.length} tarefas...`);
-
-    const header = Buffer.concat([
-      ALIGN_CENTER,
-      BOLD_ON,
-      DOUBLE_SIZE,
-      Buffer.from("FLYLADY - LISTA DE TAREFAS\n"),
-      NORMAL_SIZE,
-      BOLD_OFF,
-      ALIGN_LEFT,
-      Buffer.from(`Data: ${new Date().toLocaleDateString('pt-BR')}\n`),
-      NEW_LINE
-    ]);
-
-    const taskBuffers = tasks.map((task, index) => {
+      // Configurar formatação
+      await this.setAlignCenter();
+      await this.setBold(true);
+      await this.setDoubleHeight();
+      
+      // Imprimir cabeçalho
+      await this.printLine("==============================");
+      await this.printLine("        AVISO PROGRAMADO      ");
+      await this.printLine("==============================");
+      
+      // Voltar ao normal para o conteúdo
+      await this.setNormalSize();
+      await this.setAlignLeft();
+      await this.setBold(false);
+      
+      // Imprimir conteúdo
+      await this.printLine();
+      await this.printLine(`ID: ${task.id}`);
+      await this.setBold(true);
+      await this.printLine(`Título: ${task.title}`);
+      await this.setBold(false);
+      await this.printLine(`Descrição: ${task.description}`);
+      await this.printLine(`Horário: ${task.time}`);
+      
       const diasSemana = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
-      let diasText = "Diário";
-      if (!task.repeat_daily && task.days && task.days.length > 0) {
-        diasText = task.days.map(d => diasSemana[d - 1]).join(", ");
+      let diasText = "Diariamente";
+      if (!task.repeat_daily && task.days?.length > 0) {
+        diasText = task.days.map((d: number) => diasSemana[d - 1]).join(", ");
       }
-
-      return Buffer.concat([
-        Buffer.from(`${index + 1}. ${task.time} - ${task.title}\n`),
-        Buffer.from(`   ${task.description}\n`),
-        Buffer.from(`   📅 ${diasText} | 🏷️ ${task.category}\n`),
-        NEW_LINE
-      ]);
-    });
-
-    const footer = Buffer.concat([
-      ALIGN_CENTER,
-      Buffer.from("═══════════════════════════════\n"),
-      Buffer.from(`Total: ${tasks.length} tarefas\n`),
-      NEW_LINE,
-      NEW_LINE,
-      NEW_LINE
-    ]);
-
-    const allBuffers = [header, ...taskBuffers, footer];
-    const printBuffer = Buffer.concat(allBuffers);
-
-    port.write(printBuffer, (err) => {
-      if (err) {
-        console.error("❌ Erro ao imprimir lista:", err);
-        reject(err);
-        return;
+      await this.printLine(`Dias: ${diasText}`);
+      await this.printLine(`Categoria: ${task.category}`);
+      await this.printLine(`Prioridade: ${task.priority}`);
+      await this.printLine(`Duração: ${task.estimated_duration} minutos`);
+      if (task.zone) {
+        await this.printLine(`Zona: ${task.zone}`);
       }
+      
+      await this.printLine();
+      await this.printLine("==============================");
+      await this.printLine();
+      
+      // Cortar papel
+      await this.cutPaper();
+      
+      console.log("✔ Impressão concluída e papel cortado!");
+      return true;
+    } catch (error) {
+      console.error('❌ Erro ao imprimir tarefa:', error);
+      return false;
+    }
+  }
 
-      port!.drain(() => {
-        port!.write(CUT, (cutErr) => {
-          if (cutErr) {
-            console.error("❌ Erro ao cortar papel:", cutErr);
-            reject(cutErr);
-            return;
-          }
-          console.log("✅ Lista impressa com sucesso!");
-          resolve();
+  async printTaskList(tasks: any[], title: string = 'LISTA DE TAREFAS'): Promise<boolean> {
+    try {
+      if (!this.isConnected) {
+        console.log('📝 Modo simulação - Lista de tarefas:');
+        console.log(`Total de tarefas: ${tasks.length}`);
+        tasks.forEach(task => {
+          console.log(`- ${task.time} - ${task.title}`);
         });
-      });
-    });
-  });
+        return true;
+      }
+
+      // Configurar formatação do cabeçalho
+      await this.setAlignCenter();
+      await this.setBold(true);
+      await this.setDoubleHeight();
+      
+      // Imprimir cabeçalho
+      await this.printLine(`=== ${title} - FLYLADY ===`);
+      
+      await this.setNormalSize();
+      await this.printLine(`Data: ${new Date().toLocaleDateString('pt-BR')}`);
+      await this.printLine(`Total de tarefas: ${tasks.length}`);
+      await this.printLine();
+      
+      // Voltar ao normal para as tarefas
+      await this.setAlignLeft();
+      await this.setBold(false);
+      
+      // Organizar por horário
+      const sortedTasks = tasks.sort((a, b) => a.time.localeCompare(b.time));
+      
+      for (const task of sortedTasks) {
+        await this.setBold(true);
+        await this.printLine(`⏰ ${task.time} - ${task.title}`);
+        await this.setBold(false);
+        await this.printLine(`   ${task.description}`);
+        await this.printLine(`   Categoria: ${task.category} | Duração: ${task.estimated_duration}min`);
+        if (task.zone) {
+          await this.printLine(`   Zona: ${task.zone}`);
+        }
+        await this.printLine(`   Prioridade: ${task.priority.toUpperCase()}`);
+        await this.printLine();
+      }
+      
+      await this.printLine("=================================");
+      await this.setBold(true);
+      await this.printLine("Bom trabalho! 💪");
+      await this.setBold(false);
+      await this.printLine();
+      
+      // Cortar papel
+      await this.cutPaper();
+      
+      console.log(`✔ Lista com ${tasks.length} tarefas impressa com sucesso!`);
+      return true;
+    } catch (error) {
+      console.error('❌ Erro ao imprimir lista de tarefas:', error);
+      return false;
+    }
+  }
 }
 
-export function testPrinter(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (isDevelopment || !port) {
-      console.log("🧪 MODO DESENVOLVIMENTO - Teste de impressora");
-      console.log("═".repeat(50));
-      console.log("TESTE DE IMPRESSORA");
-      console.log("Impressora conectada com sucesso!");
-      console.log(`Data/Hora: ${new Date().toLocaleString('pt-BR')}`);
-      console.log("═".repeat(50));
-      resolve();
-      return;
-    }
-
-    if (!port || !port.isOpen) {
-      reject(new Error('Impressora não conectada'));
-      return;
-    }
-
-    console.log("🧪 Testando impressora...");
-    
-    const testBuffer = Buffer.concat([
-      ALIGN_CENTER,
-      BOLD_ON,
-      DOUBLE_SIZE,
-      Buffer.from("TESTE DE IMPRESSORA\n"),
-      NORMAL_SIZE,
-      BOLD_OFF,
-      ALIGN_LEFT,
-      Buffer.from("Impressora conectada com sucesso!\n"),
-      Buffer.from(`Data/Hora: ${new Date().toLocaleString('pt-BR')}\n`),
-      NEW_LINE,
-      NEW_LINE,
-      NEW_LINE
-    ]);
-
-    port.write(testBuffer, (err) => {
-      if (err) {
-        console.error("❌ Erro no teste:", err);
-        reject(err);
-        return;
-      }
-
-      port!.drain(() => {
-        port!.write(CUT, (cutErr) => {
-          if (cutErr) {
-            console.error("❌ Erro ao cortar papel:", cutErr);
-            reject(cutErr);
-            return;
-          }
-          console.log("✅ Teste concluído!");
-          resolve();
-        });
-      });
-    });
-  });
-}
-
-export default {
-  printTask,
-  printTaskList,
-  testPrinter
-};
+export default ThermalPrinterService;

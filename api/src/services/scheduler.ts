@@ -35,8 +35,9 @@ const printUpcomingTasks = async () => {
         
         try {
           // Usar o serviço de impressão que criamos
-          const { printTaskList } = await import('./printer');
-          await printTaskList(upcomingTasks);
+          const { default: ThermalPrinterService } = await import('./printer');
+          const printerService = new ThermalPrinterService('COM3', 9600);
+          await printerService.printTaskList(upcomingTasks, 'TAREFAS PRÓXIMAS');
           console.log(`✅ Tarefas impressas com sucesso para usuário ${userId}`);
         } catch (printError) {
           console.error(`❌ Erro ao imprimir para usuário ${userId}:`, printError);
