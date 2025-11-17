@@ -39,9 +39,18 @@ const Index = () => {
       });
     } catch (error) {
       setIsServerOnline(false);
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
+      
+      let description = "Não foi possível conectar ao servidor. ";
+      if (baseUrl.startsWith("http://") && window.location.protocol === "https:") {
+        description += "⚠️ Você está tentando acessar HTTP de uma página HTTPS (Mixed Content bloqueado pelo navegador).";
+      } else if (errorMessage.includes("CORS") || errorMessage.includes("access control")) {
+        description += "⚠️ Erro de CORS. O servidor precisa ter os headers CORS configurados.";
+      }
+      
       toast({
-        title: "Erro",
-        description: "Não foi possível conectar ao servidor",
+        title: "Erro de Conexão",
+        description,
         variant: "destructive",
       });
     }
@@ -245,8 +254,34 @@ const Index = () => {
                 <Settings className="h-5 w-5" />
                 Configuração da API
               </CardTitle>
+              <CardDescription>
+                Configure a URL base do servidor de tarefas
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {window.location.protocol === "https:" && baseUrl.startsWith("http://") && (
+                <div className="p-3 bg-warning/10 border border-warning/20 rounded-lg">
+                  <div className="flex gap-2">
+                    <span className="text-warning text-xl">⚠️</span>
+                    <div className="flex-1 space-y-1">
+                      <p className="text-sm font-medium text-warning-foreground">
+                        Aviso: Mixed Content
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Você está tentando acessar HTTP de uma página HTTPS. Isso será bloqueado pelo navegador.
+                      </p>
+                      <p className="text-xs font-medium mt-2">
+                        Soluções:
+                      </p>
+                      <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
+                        <li>Para desenvolvimento: Teste localmente (localhost)</li>
+                        <li>Para produção: Configure HTTPS no servidor</li>
+                        <li>O servidor precisa ter CORS habilitado</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2">
                 <div className="flex-1">
                   <Label htmlFor="baseUrl">URL Base da API</Label>
